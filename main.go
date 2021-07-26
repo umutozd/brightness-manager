@@ -1,143 +1,123 @@
 package main
 
 import (
-	"encoding/json"
-	"flag"
 	"fmt"
-	"io/ioutil"
-	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
+
+	"github.com/sirupsen/logrus"
+	"github.com/umutozd/brightness-controller/brightness"
+	cli "gopkg.in/urfave/cli.v1"
 )
 
-type config struct {
-	File                  *os.File `json:"-"`
-	LastAppliedDevice     string   `json:"last_applied_device,omitempty"`
-	LastAppliedBrightness float64  `json:"last_applied_brightness,omitempty"`
-	increase              bool
-	decrease              bool
-}
-
-func initConfig() (*config, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("error getting home directory: %v", err)
-	}
-	configFile := filepath.Join(home, ".config", "brightness", "config.json")
-
-	file, err := os.OpenFile(configFile, os.O_RDWR, 0766)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// file does not exist, open it with CREATE flag
-			file, err = os.OpenFile(configFile, os.O_CREATE|os.O_RDWR, 0766)
-			if err != nil {
-				return nil, fmt.Errorf("error opening config file with CREATE flag: %v", err)
-			}
-			return &config{
-				File:                  file,
-				LastAppliedDevice:     "HDMI-1-2",
-				LastAppliedBrightness: 1,
-			}, nil
-		}
-		// some other error
-		return nil, fmt.Errorf("error opening config file: %v", err)
-	}
-
-	// file is open now, read its data and unmarshal into config
-	data, err := ioutil.ReadAll(file)
-	if err != nil {
-		file.Close()
-		return nil, fmt.Errorf("error reading config file: %v", err)
-	}
-
-	cfg := &config{
-		File: file,
-	}
-	// the size of the file might be 0, use default values in this case
-	if len(data) != 0 {
-		if err = json.Unmarshal(data, cfg); err != nil {
-			file.Close()
-			return nil, fmt.Errorf("error unmarshaling config file: %v", err)
-		}
-
-	} else {
-		cfg.LastAppliedBrightness = 1
-		cfg.LastAppliedDevice = "HDMI-1-2"
-	}
-
-	return cfg, nil
-}
-
-func (cfg *config) runCommand() error {
-	if cfg.increase {
-		cfg.LastAppliedBrightness += 0.1
-	} else if cfg.decrease {
-		cfg.LastAppliedBrightness -= 0.1
-	}
-	cmd := exec.Command("xrandr", "--output", cfg.LastAppliedDevice, "--brightness", fmt.Sprint(cfg.LastAppliedBrightness))
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("xrandr failed; error: %v, output: %s", err, string(output))
+func Refresh() error {
+	logrus.Info("Refreshing...")
+	cmd := exec.Command(
+		"xrandr", "--output", cfg.LastAppliedDevice,
+		"--brightness", fmt.Sprint(cfg.LastAppliedBrightness),
+	)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("Refresh error: %v", err)
 	}
 	return nil
 }
 
-func (cfg *config) save() error {
-	b, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return fmt.Errorf("error marshaling: %v", err)
+func Increase() error {
+	newValue := cfg.LastAppliedBrightness + cfg.Increase
+	logrus.Infof("Increasing brightness by %f, to %f", cfg.Increase, newValue)
+	cmd := exec.Command(
+		"xrandr", "--output", cfg.Device,
+		"--brightness", fmt.Sprint(newValue),
+	)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("Increase error: %v", err)
 	}
 
-	if err = cfg.File.Truncate(0); err != nil {
-		return fmt.Errorf("error truncating config file to %d: %v", len(b), err)
+	// successful, save this config
+	return cfg.SaveConfigFile(newValue)
+}
+
+func Decrease() error {
+	newValue := cfg.LastAppliedBrightness - cfg.Decrease
+	logrus.Infof("Decreasing brightness by %f, to %f", cfg.Decrease, newValue)
+	cmd := exec.Command(
+		"xrandr", "--output", cfg.Device,
+		"--brightness", fmt.Sprint(newValue),
+	)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("Decrease error: %v", err)
 	}
 
-	if _, err = cfg.File.Seek(0, 0); err != nil {
-		return fmt.Errorf("error seeking in config file: %v", err)
+	// successful, save this config
+	return cfg.SaveConfigFile(newValue)
+}
+
+func Run(ctx *cli.Context) error {
+	var err error
+	logrus.Info("Entered Run()")
+	if err = cfg.OpenConfigFile(); err != nil {
+		return err
 	}
 
-	if _, err = cfg.File.Write(b); err != nil {
-		return fmt.Errorf("error writing to config file: %v", err)
+	// process the arguments
+	if cfg.Refresh {
+		return Refresh()
+	}
+	if cfg.Increase != 0 {
+		return Increase()
+	}
+	if cfg.Decrease != 0 {
+		return Decrease()
 	}
 
 	return nil
-
 }
 
-func (cfg *config) parseFlags() error {
-	inc := flag.Bool("increase", false, "when specified, brightness is increased by 0.1")
-	dec := flag.Bool("decrease", false, "when specified, brightness is decreased by 0.1")
-	flag.Parse()
-
-	if !*inc && !*dec {
-		return fmt.Errorf("either --increase or --decrease flags must be specified")
-	} else if *inc && *dec {
-		return fmt.Errorf("both increase and decrease cannot be specified")
-	}
-
-	cfg.increase = *inc
-	cfg.decrease = *dec
-	return nil
-}
+var cfg = brightness.NewConfig()
 
 func main() {
-	cfg, err := initConfig()
-	if err != nil {
-		log.Fatalf("error initializing config: %v", err)
+	app := cli.NewApp()
+	app.Authors = []cli.Author{{Name: "Umut Özdoğan", Email: "umut.ozdgan@gmail.com"}}
+	app.Description =
+		`brightness-controller is a simple command-line tool that helps adjusting
+		the brightness of multiple displays`
+	app.Flags = []cli.Flag{
+		cli.StringFlag{
+			Name:        "config-file",
+			Destination: &cfg.ConfigFile,
+			Value:       cfg.ConfigFile,
+			Usage:       "The absolute path to the config file.",
+		},
+		cli.StringFlag{
+			Name:        "device",
+			Destination: &cfg.Device,
+			Value:       cfg.Device,
+			Usage:       "The name of the device whose brightness is to be updated.",
+		},
+		cli.BoolFlag{
+			Name:        "r, refresh",
+			Destination: &cfg.Refresh,
+			Usage:       "When specified, the last applied brightness is applied.",
+		},
+		cli.Float64Flag{
+			Name:        "i, increase",
+			Destination: &cfg.Increase,
+			Value:       cfg.Increase,
+			Usage:       "Increases the brightness by the given amount. Ignored if refresh flag is specified.",
+		},
+		cli.Float64Flag{
+			Name:        "d, decrease",
+			Destination: &cfg.Decrease,
+			Value:       cfg.Decrease,
+			Usage:       "Decreases the brightness by the given amount. Ignored if refresh flag is specified or if increase flag is specified.",
+		},
 	}
-	defer cfg.File.Close()
-
-	if err = cfg.parseFlags(); err != nil {
-		log.Fatalf("error parsing command line flags: %v", err)
+	app.Action = Run
+	app.After = func(ctx *cli.Context) error {
+		return cfg.File.Close()
 	}
 
-	if err = cfg.runCommand(); err != nil {
-		log.Fatalf("error running command: %v", err)
+	if err := app.Run(os.Args); err != nil {
+		logrus.WithError(err).Fatal("Fatal error")
 	}
-
-	if err = cfg.save(); err != nil {
-		log.Fatalf("error saving config to file: %v", err)
-	}
-
 }
