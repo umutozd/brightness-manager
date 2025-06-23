@@ -37,6 +37,9 @@ func NewConfig() *Config {
 }
 
 func (cfg *Config) OpenConfigFile() error {
+	if err := os.MkdirAll(filepath.Dir(cfg.ConfigFile), 0o755); err != nil {
+		return fmt.Errorf("error ensuring config directory: %v", err)
+	}
 	file, err := os.OpenFile(cfg.ConfigFile, os.O_RDWR, 0766)
 	if err != nil {
 		if !os.IsNotExist(err) {
