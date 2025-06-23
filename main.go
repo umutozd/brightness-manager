@@ -70,6 +70,8 @@ func Run(ctx *cli.Context) error {
 		return Decrease()
 	}
 
+	// no actionable flags were provided
+	cli.ShowAppHelp(ctx)
 	return nil
 }
 
