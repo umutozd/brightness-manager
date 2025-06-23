@@ -24,6 +24,13 @@ func Refresh() error {
 
 func Increase() error {
 	newValue := cfg.LastAppliedBrightness + cfg.Increase
+	if newValue > 1 {
+		logrus.Warnf("Calculated brightness %f exceeds maximum; clamping to 1", newValue)
+		newValue = 1
+	} else if newValue < 0 {
+		logrus.Warnf("Calculated brightness %f below minimum; clamping to 0", newValue)
+		newValue = 0
+	}
 	logrus.Infof("Increasing brightness by %f, to %f", cfg.Increase, newValue)
 	cmd := exec.Command(
 		"xrandr", "--output", cfg.Device,
@@ -39,6 +46,13 @@ func Increase() error {
 
 func Decrease() error {
 	newValue := cfg.LastAppliedBrightness - cfg.Decrease
+	if newValue > 1 {
+		logrus.Warnf("Calculated brightness %f exceeds maximum; clamping to 1", newValue)
+		newValue = 1
+	} else if newValue < 0 {
+		logrus.Warnf("Calculated brightness %f below minimum; clamping to 0", newValue)
+		newValue = 0
+	}
 	logrus.Infof("Decreasing brightness by %f, to %f", cfg.Decrease, newValue)
 	cmd := exec.Command(
 		"xrandr", "--output", cfg.Device,
