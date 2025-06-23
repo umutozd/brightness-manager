@@ -10,6 +10,3 @@ $(OUTPUT): $(FILES)
 
 copy-to-path:
 	sudo cp $(OUTPUT) $(USER_BIN)
-
-clean:
-	rm -f $(OUTPUT)
